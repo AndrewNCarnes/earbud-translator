@@ -9,6 +9,8 @@
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎧</text></svg>" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Translator" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <title>AirPod Translator</title>
   </head>
   <body>
@@ -17,6 +19,11 @@
         <h1>AirPod Translator</h1>
         <p class="status"><span id="status-dot" class="dot"></span><span id="status-text">Stopped</span></p>
       </header>
+
+      <p id="install-hint" class="install-hint" hidden>
+        <span>Tip: tap Share → <strong>Add to Home Screen</strong> to open this like an app.</span>
+        <button id="install-hint-close" type="button" aria-label="Dismiss tip">×</button>
+      </p>
 
       <label class="field">
         <span>Microphone</span>

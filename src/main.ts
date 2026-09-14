@@ -21,6 +21,7 @@ const VOICE_SAMPLES: Record<Lang, string> = {
   es: '¡Hola! Así sonarán tus traducciones.',
 };
 const MODELS_CACHED_KEY = 'airpod-translator:models-cached';
+const INSTALL_HINT_DISMISSED_KEY = 'airpod-translator:install-hint-dismissed';
 /** Ignore the mic briefly after speaking so the tail of the voice isn't picked up. */
 const ECHO_TAIL_MS = 300;
 
@@ -317,6 +318,40 @@ document.querySelectorAll<HTMLButtonElement>('.test-voice').forEach((button) => 
   });
 });
 
+/** In iOS Safari (not yet installed), suggest adding the app to the home screen. */
+function setUpInstallHint() {
+  const hint = $('install-hint');
+  const isIOS =
+    /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isInstalled =
+    (navigator as Navigator & { standalone?: boolean }).standalone === true ||
+    matchMedia('(display-mode: standalone)').matches;
+  let dismissed = false;
+  try {
+    dismissed = localStorage.getItem(INSTALL_HINT_DISMISSED_KEY) === '1';
+  } catch {
+    // Storage unavailable; show the hint.
+  }
+
+  hint.hidden = !isIOS || isInstalled || dismissed;
+  $('install-hint-close').addEventListener('click', () => {
+    hint.hidden = true;
+    try {
+      localStorage.setItem(INSTALL_HINT_DISMISSED_KEY, '1');
+    } catch {
+      // Storage unavailable; the hint will reappear next visit.
+    }
+  });
+}
+
+// Only in production: in dev the service worker would serve stale files.
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register(new URL('sw.js', document.baseURI)).catch(() => undefined);
+  });
+}
+
+setUpInstallHint();
 onVoicesChanged(populateVoices);
 void populateMicrophones();
 setStatus('idle');

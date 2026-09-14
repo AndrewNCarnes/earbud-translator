@@ -68,6 +68,39 @@ h1 {
   background: var(--accent);
 }
 
+.install-hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.install-hint[hidden] {
+  display: none;
+}
+
+.install-hint span {
+  flex: 1;
+}
+
+.install-hint strong {
+  color: var(--text);
+}
+
+.install-hint button {
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 22px;
+  line-height: 1;
+}
+
 .field {
   display: grid;
   gap: 6px;
