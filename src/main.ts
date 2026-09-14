@@ -4,9 +4,22 @@ import type { MicVAD } from '@ricky0123/vad-web';
 
 import { createListener, listMicrophones } from './audio';
 import { OTHER, type FromWorker, type Lang, type ToWorker } from './messages';
-import { speak, stopSpeaking, unlockSpeech } from './speech';
+import {
+  getPreferredVoice,
+  onVoicesChanged,
+  setPreferredVoice,
+  speak,
+  stopSpeaking,
+  unlockSpeech,
+  voicesFor,
+} from './speech';
 
 const FLAGS: Record<Lang, string> = { en: '🇺🇸', es: '🇪🇸' };
+const LANGS: Lang[] = ['en', 'es'];
+const VOICE_SAMPLES: Record<Lang, string> = {
+  en: 'Hi! This is how your translations will sound.',
+  es: '¡Hola! Así sonarán tus traducciones.',
+};
 const MODELS_CACHED_KEY = 'airpod-translator:models-cached';
 /** Ignore the mic briefly after speaking so the tail of the voice isn't picked up. */
 const ECHO_TAIL_MS = 300;
@@ -33,6 +46,10 @@ const errorBox = $('error');
 const list = $('entries');
 const empty = $('empty');
 const mainButton = $<HTMLButtonElement>('main-button');
+const voiceSelects: Record<Lang, HTMLSelectElement> = {
+  en: $<HTMLSelectElement>('voice-en'),
+  es: $<HTMLSelectElement>('voice-es'),
+};
 
 const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
 
@@ -273,6 +290,34 @@ navigator.mediaDevices?.addEventListener('devicechange', () => {
   void populateMicrophones();
 });
 
+function populateVoices() {
+  for (const lang of LANGS) {
+    const select = voiceSelects[lang];
+    const voices = voicesFor(lang);
+    select.replaceChildren(
+      ...voices.map((voice) => new Option(voice.localService ? voice.name : `${voice.name} (needs internet)`, voice.voiceURI)),
+    );
+    const preferred = getPreferredVoice(lang);
+    if (preferred && voices.some((voice) => voice.voiceURI === preferred)) {
+      select.value = preferred;
+    }
+    select.disabled = voices.length === 0;
+  }
+}
+
+for (const lang of LANGS) {
+  voiceSelects[lang].addEventListener('change', () => setPreferredVoice(lang, voiceSelects[lang].value));
+}
+
+document.querySelectorAll<HTMLButtonElement>('.test-voice').forEach((button) => {
+  button.addEventListener('click', () => {
+    const lang = button.dataset.lang as Lang;
+    stopSpeaking();
+    void speak(VOICE_SAMPLES[lang], lang);
+  });
+});
+
+onVoicesChanged(populateVoices);
 void populateMicrophones();
 setStatus('idle');
 

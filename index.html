@@ -23,6 +23,28 @@
         <select id="mic"></select>
       </label>
 
+      <details class="voices">
+        <summary>Voices</summary>
+        <div class="field">
+          <label for="voice-en">English voice</label>
+          <div class="row">
+            <select id="voice-en"></select>
+            <button type="button" class="test-voice" data-lang="en">Test</button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="voice-es">Spanish voice</label>
+          <div class="row">
+            <select id="voice-es"></select>
+            <button type="button" class="test-voice" data-lang="es">Test</button>
+          </div>
+        </div>
+        <p class="hint">
+          Voices named Natural, Premium, or Enhanced sound the most human. On iPhone, download better ones in
+          Settings → Accessibility → Spoken Content → Voices, then reload this page.
+        </p>
+      </details>
+
       <section id="progress" class="progress" hidden>
         <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
         <p id="progress-text"></p>
