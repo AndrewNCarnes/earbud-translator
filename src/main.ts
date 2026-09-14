@@ -22,6 +22,13 @@ const VOICE_SAMPLES: Record<Lang, string> = {
 };
 const MODELS_CACHED_KEY = 'airpod-translator:models-cached';
 const INSTALL_HINT_DISMISSED_KEY = 'airpod-translator:install-hint-dismissed';
+/** Set while models load and cleared when loading ends, so a leftover value means the tab crashed mid-load. */
+const LOAD_STAGE_KEY = 'airpod-translator:load-stage';
+
+const IS_IOS =
+  /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+/** iPhone Safari kills tabs that use much more than ~1 GB. `?lowmem` forces this mode for testing on a PC. */
+const IS_LOW_MEMORY = IS_IOS || new URLSearchParams(location.search).has('lowmem');
 /** Ignore the mic briefly after speaking so the tail of the voice isn't picked up. */
 const ECHO_TAIL_MS = 300;
 
@@ -91,16 +98,30 @@ function showError(message: string | null) {
   errorBox.textContent = message ?? '';
 }
 
+function rememberLoadStage(stage: string | null) {
+  try {
+    if (stage) {
+      localStorage.setItem(LOAD_STAGE_KEY, stage);
+    } else {
+      localStorage.removeItem(LOAD_STAGE_KEY);
+    }
+  } catch {
+    // Storage unavailable; crash detection just won't work.
+  }
+}
+
 function formatMB(bytes: number) {
   return `${Math.round(bytes / 1_000_000)} MB`;
 }
 
 function loadModels(): Promise<void> {
   modelsReady ??= new Promise<void>((resolve, reject) => {
+    let stage = 'models';
     const cleanup = () => {
       worker.removeEventListener('message', onMessage);
       worker.removeEventListener('error', onWorkerError);
       progress.hidden = true;
+      rememberLoadStage(null);
     };
     const fail = (message: string) => {
       cleanup();
@@ -113,10 +134,16 @@ function loadModels(): Promise<void> {
     };
     const onMessage = (event: MessageEvent<FromWorker>) => {
       const message = event.data;
-      if (message.type === 'progress' && message.total > 0) {
+      if (message.type === 'stage') {
+        stage = message.label;
+        rememberLoadStage(stage);
+        progress.hidden = false;
+        progressBar.style.width = '0%';
+        progressText.textContent = `Loading ${stage}…`;
+      } else if (message.type === 'progress' && message.total > 0) {
         progress.hidden = false;
         progressBar.style.width = `${Math.min(100, (message.loaded / message.total) * 100)}%`;
-        progressText.textContent = `Downloading models: ${formatMB(message.loaded)} of ${formatMB(message.total)} (one time only)`;
+        progressText.textContent = `Downloading ${stage}: ${formatMB(message.loaded)} of ${formatMB(message.total)} (one time only)`;
       } else if (message.type === 'ready') {
         cleanup();
         try {
@@ -131,7 +158,7 @@ function loadModels(): Promise<void> {
     };
     worker.addEventListener('message', onMessage);
     worker.addEventListener('error', onWorkerError);
-    send({ type: 'load' });
+    send({ type: 'load', lowMemory: IS_LOW_MEMORY });
   });
   return modelsReady;
 }
@@ -321,8 +348,6 @@ document.querySelectorAll<HTMLButtonElement>('.test-voice').forEach((button) => 
 /** In iOS Safari (not yet installed), suggest adding the app to the home screen. */
 function setUpInstallHint() {
   const hint = $('install-hint');
-  const isIOS =
-    /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   const isInstalled =
     (navigator as Navigator & { standalone?: boolean }).standalone === true ||
     matchMedia('(display-mode: standalone)').matches;
@@ -333,7 +358,7 @@ function setUpInstallHint() {
     // Storage unavailable; show the hint.
   }
 
-  hint.hidden = !isIOS || isInstalled || dismissed;
+  hint.hidden = !IS_IOS || isInstalled || dismissed;
   $('install-hint-close').addEventListener('click', () => {
     hint.hidden = true;
     try {
@@ -356,11 +381,28 @@ onVoicesChanged(populateVoices);
 void populateMicrophones();
 setStatus('idle');
 
-// Returning visitors already have the models cached, so warm them up right away.
+// A leftover load stage means the tab crashed while loading (usually out of memory). Say so, and don't
+// auto-load again, or Safari's automatic reload would crash straight back into the same spot.
+let crashedWhileLoading: string | null = null;
 try {
-  if (localStorage.getItem(MODELS_CACHED_KEY)) {
-    loadModels().catch(() => undefined);
-  }
+  crashedWhileLoading = localStorage.getItem(LOAD_STAGE_KEY);
 } catch {
-  // Storage unavailable; models load on first Start instead.
+  // Storage unavailable.
+}
+rememberLoadStage(null);
+
+if (crashedWhileLoading) {
+  showError(
+    `Last time, the page stopped while loading the ${crashedWhileLoading} — your phone probably ran out of memory. ` +
+      'Close other Safari tabs and apps, then tap Start again.',
+  );
+} else {
+  // Returning visitors already have the models cached, so warm them up right away.
+  try {
+    if (localStorage.getItem(MODELS_CACHED_KEY)) {
+      loadModels().catch(() => undefined);
+    }
+  } catch {
+    // Storage unavailable; models load on first Start instead.
+  }
 }

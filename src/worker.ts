@@ -75,36 +75,47 @@ function trackProgress() {
   };
 }
 
-async function load() {
-  const device = (await hasWebGPU()) ? 'webgpu' : 'wasm';
-  const progress_callback = trackProgress();
+/**
+ * Loads models one at a time: each file is buffered and copied while it loads, so loading
+ * everything in parallel spikes memory past what iPhone Safari allows before it kills the tab.
+ */
+async function load(lowMemory: boolean) {
+  // WebGPU keeps extra copies of the weights and needs the larger fp32/q4 variants, so phones use WASM with q8.
+  const device = !lowMemory && (await hasWebGPU()) ? 'webgpu' : 'wasm';
 
-  const [loadedProcessor, loadedTokenizer, loadedWhisper, spanishToEnglish, englishToSpanish] = await Promise.all([
-    AutoProcessor.from_pretrained(WHISPER_ID, { progress_callback }),
-    AutoTokenizer.from_pretrained(WHISPER_ID, { progress_callback }),
-    WhisperForConditionalGeneration.from_pretrained(WHISPER_ID, {
-      device,
-      // WebGPU mishandles q8 decoders, so it gets q4; WASM runs q8 fastest.
-      dtype:
-        device === 'webgpu'
-          ? { encoder_model: 'fp32', decoder_model_merged: 'q4' }
-          : { encoder_model: 'q8', decoder_model_merged: 'q8' },
-      progress_callback,
-    }),
-    // The translation models are small enough to run well on WASM.
-    pipeline('translation', TRANSLATION_IDS.es, { ...TRANSLATION_OPTIONS, progress_callback }),
-    pipeline('translation', TRANSLATION_IDS.en, { ...TRANSLATION_OPTIONS, progress_callback }),
-  ]);
+  post({ type: 'stage', label: 'speech model' });
+  const whisperProgress = trackProgress();
+  processor = (await AutoProcessor.from_pretrained(WHISPER_ID, { progress_callback: whisperProgress })) as unknown as Processor;
+  tokenizer = (await AutoTokenizer.from_pretrained(WHISPER_ID, { progress_callback: whisperProgress })) as unknown as Tokenizer;
+  whisper = (await WhisperForConditionalGeneration.from_pretrained(WHISPER_ID, {
+    device,
+    // WebGPU mishandles q8 decoders, so it gets q4; WASM runs q8 fastest and smallest.
+    dtype:
+      device === 'webgpu'
+        ? { encoder_model: 'fp32', decoder_model_merged: 'q4' }
+        : { encoder_model: 'q8', decoder_model_merged: 'q8' },
+    // Same ONNX Runtime QDQ optimizer bug as the translation models hits the q8 decoder on WASM.
+    ...(device === 'wasm' ? { session_options: { graphOptimizationLevel: 'basic' as const } } : {}),
+    progress_callback: whisperProgress,
+  })) as unknown as Whisper;
 
-  processor = loadedProcessor as unknown as Processor;
-  tokenizer = loadedTokenizer as unknown as Tokenizer;
-  whisper = loadedWhisper as unknown as Whisper;
-  translators = {
-    es: spanishToEnglish as unknown as Translate,
-    en: englishToSpanish as unknown as Translate,
-  };
+  // The translation models are small enough to run well on WASM.
+  post({ type: 'stage', label: 'Spanish → English model' });
+  const spanishToEnglish = (await pipeline('translation', TRANSLATION_IDS.es, {
+    ...TRANSLATION_OPTIONS,
+    progress_callback: trackProgress(),
+  })) as unknown as Translate;
 
-  // Run once on silence so WebGPU compiles its shaders now instead of on the first real phrase.
+  post({ type: 'stage', label: 'English → Spanish model' });
+  const englishToSpanish = (await pipeline('translation', TRANSLATION_IDS.en, {
+    ...TRANSLATION_OPTIONS,
+    progress_callback: trackProgress(),
+  })) as unknown as Translate;
+
+  translators = { es: spanishToEnglish, en: englishToSpanish };
+
+  // Run once on silence so the first real phrase doesn't pay one-time setup costs (e.g. WebGPU shader compiles).
+  post({ type: 'stage', label: 'warm-up' });
   await transcribe(new Float32Array(16_000));
 
   post({ type: 'ready', device });
@@ -159,7 +170,9 @@ function errorMessage(error: unknown) {
 self.addEventListener('message', (event: MessageEvent<ToWorker>) => {
   const message = event.data;
   if (message.type === 'load') {
-    load().catch((error) => post({ type: 'error', message: `Couldn't load the models: ${errorMessage(error)}` }));
+    load(message.lowMemory).catch((error) =>
+      post({ type: 'error', message: `Couldn't load the models: ${errorMessage(error)}` }),
+    );
   } else {
     // One phrase at a time; the models can't run concurrently.
     queue = queue

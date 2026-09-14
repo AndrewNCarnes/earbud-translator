@@ -17,6 +17,7 @@ Website meant for iPhone Safari with AirPods: listens for English or Spanish, tr
 - vad-web imports its own nested `onnxruntime-web` (differs from Transformers.js). `vite.config.ts` copies that copy's WASM plus the worklet and model into `dist/vad/`.
 - `base: './'` in Vite so the site works under `/<repo>/` on GitHub Pages.
 - The mic needs HTTPS (or localhost).
+- iPhone Safari kills tabs that use much more than ~1 GB ("A problem repeatedly occurred"). Models load one at a time, and iOS uses WASM + q8 Whisper instead of WebGPU. Test that mode on a PC with `?lowmem`. `LOAD_STAGE_KEY` detects a crash mid-load and skips auto-preload on the reload.
 
 ## Commands
 - `npm run dev`: local dev server (desktop Chrome/Safari works for testing).
