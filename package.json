@@ -1,25 +1,21 @@
 {
   "name": "airpod-translator",
+  "private": true,
   "version": "1.0.0",
-  "main": "index.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc"
+  },
   "dependencies": {
-    "expo": "~57.0.22",
-    "expo-build-properties": "~57.0.17",
-    "expo-dev-client": "~57.0.19",
-    "expo-status-bar": "~57.0.1",
-    "react": "19.2.3",
-    "react-native": "0.86.3",
-    "react-native-safe-area-context": "~5.7.0"
+    "@huggingface/transformers": "^4.2.0",
+    "@ricky0123/vad-web": "^0.0.31"
   },
   "devDependencies": {
-    "@types/react": "~19.2.2",
-    "typescript": "~6.0.3"
-  },
-  "scripts": {
-    "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
-    "web": "expo start --web"
-  },
-  "private": true
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0",
+    "vite-plugin-static-copy": "^4.1.1"
+  }
 }

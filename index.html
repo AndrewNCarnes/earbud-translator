@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b1020" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Translator" />
+    <title>AirPod Translator</title>
+  </head>
+  <body>
+    <main class="app">
+      <header>
+        <h1>AirPod Translator</h1>
+        <p class="status"><span id="status-dot" class="dot"></span><span id="status-text">Stopped</span></p>
+      </header>
+
+      <label class="field">
+        <span>Microphone</span>
+        <select id="mic"></select>
+      </label>
+
+      <section id="progress" class="progress" hidden>
+        <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
+        <p id="progress-text"></p>
+      </section>
+
+      <p id="error" class="error" hidden></p>
+
+      <section id="entries" class="entries" aria-live="polite"></section>
+      <p id="empty" class="empty">Tap Start, then talk or play some English or Spanish. The first start downloads about 400 MB of AI models.</p>
+
+      <footer>
+        <button id="main-button" class="main-button" type="button">Start</button>
+      </footer>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

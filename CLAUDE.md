@@ -1,21 +1,24 @@
-@AGENTS.md
-
 # AirPod Translator
 
-iPhone app: listens for English or Spanish, translates on-device to the other language, and speaks it through AirPods.
+Website meant for iPhone Safari with AirPods: listens for English or Spanish, translates to the other language, and speaks it. All AI runs in the browser (no server, no paid APIs). Deployed to GitHub Pages.
 
 ## Stack
-- Expo SDK 57 (React Native + TypeScript), iOS only, deployment target iOS 26.
-- Native work lives in the local Expo module `modules/live-translator` (Swift):
-  - `TranslatorEngine.swift`: pipeline. Mic → two `SpeechAnalyzer` lanes (en-US, es-ES) → `UtteranceResolver`/`LanguagePicker` → `Translator` → `Speaker`.
-  - `AudioRouter.swift`: `phone` mode (iPhone mic in, AirPods A2DP out) or `airpods` mode (HFP mic).
-  - `AudioTap.swift`: converts mic buffers to the analyzer format and mutes input while speaking (echo guard).
-  - `Translator.swift`: Translation framework. Headless sessions need installed packs, and `TranslationDownloadView` triggers the download sheet.
-- JS: `App.tsx` (UI) and `src/useTranslator.ts` (hook over module events). The event/type contract is in `modules/live-translator/src/LiveTranslator.types.ts` and must stay in sync with the Swift `emit` calls.
+- Vite + TypeScript, vanilla DOM (no framework).
+- `src/worker.ts` (Web Worker, Transformers.js 4):
+  - Speech: `onnx-community/whisper-base`, WebGPU when available, WASM otherwise.
+  - Translation: `Xenova/opus-mt-es-en` and `Xenova/opus-mt-en-es`.
+  - Language detection is custom (`detectLanguage`): one decoder step, comparing the `<|en|>` and `<|es|>` logits. Transformers.js has none built in, and multilingual Whisper silently defaults to English without it.
+- `src/audio.ts`: `@ricky0123/vad-web` (Silero VAD) splits mic audio into 16 kHz phrases.
+- `src/speech.ts`: `speechSynthesis` output. It must be unlocked during the Start tap on iOS.
+- `src/main.ts`: UI, the speech queue, and the echo guard (phrases heard while speaking are dropped, not VAD pause, since pausing re-opens the mic on iOS).
+- `src/messages.ts`: the worker message contract.
 
-## Development is Windows-only (no Mac)
-- Swift can't be compiled locally. The EAS cloud build is the compile check: `eas build --profile development --platform ios`.
-- JS-only changes: `npx expo start --tunnel` with the installed dev client, no rebuild needed.
-- Swift or `app.json` changes: new EAS dev build.
-- Local checks before building: `npx tsc --noEmit` and `npx expo-doctor`.
-- Speech/Translation only work on a real iPhone (iOS 26+), not the simulator.
+## Gotchas
+- vad-web imports its own nested `onnxruntime-web` (differs from Transformers.js). `vite.config.ts` copies that copy's WASM plus the worklet and model into `dist/vad/`.
+- `base: './'` in Vite so the site works under `/<repo>/` on GitHub Pages.
+- The mic needs HTTPS (or localhost).
+
+## Commands
+- `npm run dev`: local dev server (desktop Chrome/Safari works for testing).
+- `npm run build`: type-check + production build into `dist/`.
+- Deploy: push to GitHub; `.github/workflows/deploy.yml` builds and publishes to Pages.
