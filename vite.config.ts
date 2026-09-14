@@ -9,7 +9,12 @@ export default defineConfig({
   // Relative paths so the site works under a GitHub Pages sub-path (/<repo>/).
   base: './',
   worker: { format: 'es' },
-  optimizeDeps: { exclude: ['@huggingface/transformers', 'onnxruntime-web'] },
+  optimizeDeps: {
+    exclude: ['@huggingface/transformers'],
+    // vad-web is CommonJS and `require`s onnxruntime-web. Pre-bundling converts that require;
+    // excluding onnxruntime-web leaves a bare `require` that crashes the page on load in dev.
+    include: ['@ricky0123/vad-web'],
+  },
   plugins: [
     // The voice-activity detector loads its worklet, model, and ONNX runtime files at runtime from ./vad/.
     viteStaticCopy({

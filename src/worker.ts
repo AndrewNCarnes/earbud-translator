@@ -7,6 +7,13 @@ const TRANSLATION_IDS: Record<Lang, string> = {
   es: 'Xenova/opus-mt-es-en',
   en: 'Xenova/opus-mt-en-es',
 };
+const TRANSLATION_OPTIONS = {
+  device: 'wasm',
+  dtype: 'q8',
+  // ONNX Runtime's extended graph optimizations fail on these quantized Marian models
+  // ("TransposeDQWeightsForMatMulNBits Missing required scale"), so stick to basic ones.
+  session_options: { graphOptimizationLevel: 'basic' },
+} as const;
 
 // Whisper tends to invent these on silence or background noise.
 const HALLUCINATIONS = new Set([
@@ -85,8 +92,8 @@ async function load() {
       progress_callback,
     }),
     // The translation models are small enough to run well on WASM.
-    pipeline('translation', TRANSLATION_IDS.es, { device: 'wasm', dtype: 'q8', progress_callback }),
-    pipeline('translation', TRANSLATION_IDS.en, { device: 'wasm', dtype: 'q8', progress_callback }),
+    pipeline('translation', TRANSLATION_IDS.es, { ...TRANSLATION_OPTIONS, progress_callback }),
+    pipeline('translation', TRANSLATION_IDS.en, { ...TRANSLATION_OPTIONS, progress_callback }),
   ]);
 
   processor = loadedProcessor as unknown as Processor;

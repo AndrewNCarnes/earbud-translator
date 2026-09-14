@@ -15,10 +15,13 @@ type ListenerOptions = {
 
 /** Opens the mic and splits what it hears into phrases, using the Silero voice-activity detector. */
 export async function createListener({ deviceId, onSpeechStart, onSpeechEnd, onMisfire }: ListenerOptions) {
+  // Absolute URL: vad-web resolves relative paths against its own bundled module, not the page.
+  // Basing it on the page keeps it working under a GitHub Pages sub-path too.
+  const assetBase = new URL('vad/', document.baseURI).href;
   const vad = await MicVAD.new({
     model: 'v5',
-    baseAssetPath: './vad/',
-    onnxWASMBasePath: './vad/',
+    baseAssetPath: assetBase,
+    onnxWASMBasePath: assetBase,
     startOnLoad: false,
     getStream: () =>
       navigator.mediaDevices.getUserMedia({

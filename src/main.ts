@@ -79,6 +79,20 @@ function formatMB(bytes: number) {
 
 function loadModels(): Promise<void> {
   modelsReady ??= new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      worker.removeEventListener('message', onMessage);
+      worker.removeEventListener('error', onWorkerError);
+      progress.hidden = true;
+    };
+    const fail = (message: string) => {
+      cleanup();
+      modelsReady = null;
+      reject(new Error(message));
+    };
+    // Fires if the worker script itself can't load or throws outside a message handler.
+    const onWorkerError = (event: ErrorEvent) => {
+      fail(`The translator failed to start: ${event.message || 'unknown error'}`);
+    };
     const onMessage = (event: MessageEvent<FromWorker>) => {
       const message = event.data;
       if (message.type === 'progress' && message.total > 0) {
@@ -86,8 +100,7 @@ function loadModels(): Promise<void> {
         progressBar.style.width = `${Math.min(100, (message.loaded / message.total) * 100)}%`;
         progressText.textContent = `Downloading models: ${formatMB(message.loaded)} of ${formatMB(message.total)} (one time only)`;
       } else if (message.type === 'ready') {
-        worker.removeEventListener('message', onMessage);
-        progress.hidden = true;
+        cleanup();
         try {
           localStorage.setItem(MODELS_CACHED_KEY, '1');
         } catch {
@@ -95,13 +108,11 @@ function loadModels(): Promise<void> {
         }
         resolve();
       } else if (message.type === 'error' && message.id === undefined) {
-        worker.removeEventListener('message', onMessage);
-        progress.hidden = true;
-        modelsReady = null;
-        reject(new Error(message.message));
+        fail(message.message);
       }
     };
     worker.addEventListener('message', onMessage);
+    worker.addEventListener('error', onWorkerError);
     send({ type: 'load' });
   });
   return modelsReady;
