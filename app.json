@@ -7,7 +7,14 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.andrewcarnes.airpodtranslator",
+      "deploymentTarget": "26.0",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Listens to nearby speech so it can be translated.",
+        "NSSpeechRecognitionUsageDescription": "Transcribes speech on-device so it can be translated.",
+        "UIBackgroundModes": ["audio"]
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -20,6 +27,9 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-build-properties"
+    ]
   }
 }
