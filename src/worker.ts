@@ -1,12 +1,9 @@
 import { AutoProcessor, AutoTokenizer, Tensor, WhisperForConditionalGeneration, pipeline } from '@huggingface/transformers';
 
-import type { FromWorker, Lang, ToWorker } from './messages';
+import type { Lang, ToWorker } from './messages';
+import { TRANSLATION_IDS, errorMessage, isHallucination, post, trackProgress, type Translate } from './worker-shared';
 
 const WHISPER_ID = 'onnx-community/whisper-base';
-const TRANSLATION_IDS: Record<Lang, string> = {
-  es: 'Xenova/opus-mt-es-en',
-  en: 'Xenova/opus-mt-en-es',
-};
 const TRANSLATION_OPTIONS = {
   device: 'wasm',
   dtype: 'q8',
@@ -14,18 +11,6 @@ const TRANSLATION_OPTIONS = {
   // ("TransposeDQWeightsForMatMulNBits Missing required scale"), so stick to basic ones.
   session_options: { graphOptimizationLevel: 'basic' },
 } as const;
-
-// Whisper tends to invent these on silence or background noise.
-const HALLUCINATIONS = new Set([
-  'you',
-  '...',
-  'thank you.',
-  'thanks for watching!',
-  'thank you for watching.',
-  'gracias.',
-  'gracias por ver el video.',
-  'subtítulos realizados por la comunidad de amara.org',
-]);
 
 // Narrow views of the Transformers.js objects, covering only what this worker calls.
 type Processor = (audio: Float32Array) => Promise<{ input_features: Tensor }>;
@@ -35,18 +20,12 @@ type Whisper = {
   forward(inputs: Record<string, Tensor>): Promise<{ logits: Tensor }>;
   generate(options: Record<string, unknown>): Promise<Tensor>;
 };
-type Translate = (text: string) => Promise<{ translation_text: string }[]>;
-type ProgressEvent = { status: string; name?: string; file?: string; loaded?: number; total?: number };
 
 let processor: Processor;
 let tokenizer: Tokenizer;
 let whisper: Whisper;
 let translators: Record<Lang, Translate>;
 let queue: Promise<void> = Promise.resolve();
-
-function post(message: FromWorker) {
-  self.postMessage(message);
-}
 
 async function hasWebGPU(): Promise<boolean> {
   const gpu = (navigator as Navigator & { gpu?: { requestAdapter(): Promise<unknown> } }).gpu;
@@ -55,24 +34,6 @@ async function hasWebGPU(): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-/** Sums byte progress across every model file into one overall figure. */
-function trackProgress() {
-  const files = new Map<string, { loaded: number; total: number }>();
-  return (info: ProgressEvent) => {
-    if (info.status !== 'progress' || !info.file) {
-      return;
-    }
-    files.set(`${info.name}/${info.file}`, { loaded: info.loaded ?? 0, total: info.total ?? 0 });
-    let loaded = 0;
-    let total = 0;
-    for (const file of files.values()) {
-      loaded += file.loaded;
-      total += file.total;
-    }
-    post({ type: 'progress', loaded, total });
-  };
 }
 
 /**
@@ -155,16 +116,12 @@ async function transcribe(audio: Float32Array) {
 
 async function handle(id: number, audio: Float32Array) {
   const { language, confidence, text } = await transcribe(audio);
-  if (!text || HALLUCINATIONS.has(text.toLowerCase())) {
+  if (isHallucination(text)) {
     post({ type: 'skip', id });
     return;
   }
   const [{ translation_text }] = await translators[language](text);
   post({ type: 'result', id, language, confidence, text, translation: translation_text.trim() });
-}
-
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
 }
 
 self.addEventListener('message', (event: MessageEvent<ToWorker>) => {

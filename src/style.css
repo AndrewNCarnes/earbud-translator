@@ -109,7 +109,8 @@ h1 {
   font-size: 14px;
 }
 
-select {
+select,
+input {
   width: 100%;
   padding: 12px;
   border: 1px solid var(--border);
@@ -119,7 +120,7 @@ select {
   font-size: 16px;
 }
 
-.voices {
+.settings {
   margin-bottom: 12px;
   padding: 12px;
   border: 1px solid var(--border);
@@ -127,17 +128,17 @@ select {
   background: var(--surface);
 }
 
-.voices summary {
+.settings summary {
   cursor: pointer;
   color: var(--text);
   font-weight: 600;
 }
 
-.voices[open] summary {
+.settings[open] summary {
   margin-bottom: 12px;
 }
 
-.voices select {
+.settings select {
   background: var(--background);
 }
 
@@ -166,6 +167,49 @@ select {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.4;
+}
+
+/* Elements with their own `display` (e.g. grid fields) would otherwise ignore the hidden attribute. */
+[hidden] {
+  display: none !important;
+}
+
+.direction {
+  margin-bottom: 12px;
+}
+
+.direction-label {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.segmented button {
+  padding: 12px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--muted);
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.segmented button[aria-pressed='true'] {
+  background: var(--accent);
+  color: var(--text);
+}
+
+.settings input {
+  background: var(--background);
 }
 
 .progress {

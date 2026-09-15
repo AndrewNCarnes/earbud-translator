@@ -25,13 +25,39 @@
         <button id="install-hint-close" type="button" aria-label="Dismiss tip">×</button>
       </p>
 
-      <label class="field">
+      <section id="direction" class="direction" hidden>
+        <p class="direction-label">Listening for</p>
+        <div class="segmented" role="group" aria-label="Language being spoken">
+          <button type="button" data-listen="es" aria-pressed="true">🇪🇸 Spanish</button>
+          <button type="button" data-listen="en" aria-pressed="false">🇺🇸 English</button>
+        </div>
+      </section>
+
+      <label id="mic-field" class="field">
         <span>Microphone</span>
         <select id="mic"></select>
       </label>
 
-      <details class="voices">
-        <summary>Voices</summary>
+      <details class="settings">
+        <summary>Settings</summary>
+        <div class="field">
+          <label for="engine">Translation engine</label>
+          <select id="engine">
+            <option value="auto">Automatic</option>
+            <option value="ai">On-device AI (detects language)</option>
+            <option value="webspeech">Safari speech + online translation</option>
+            <option value="ai-legacy">On-device AI, old library (experimental)</option>
+          </select>
+          <p id="engine-note" class="hint"></p>
+        </div>
+        <div id="email-field" class="field" hidden>
+          <label for="email">Email for more free translations (optional)</label>
+          <input id="email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" />
+          <p class="hint">
+            Only sent to MyMemory, the translation service, which raises the free limit from 5,000 to 50,000 characters a
+            day.
+          </p>
+        </div>
         <div class="field">
           <label for="voice-en">English voice</label>
           <div class="row">
@@ -60,7 +86,7 @@
       <p id="error" class="error" hidden></p>
 
       <section id="entries" class="entries" aria-live="polite"></section>
-      <p id="empty" class="empty">Tap Start, then talk or play some English or Spanish. The first start downloads a few hundred MB of AI models, so use Wi-Fi.</p>
+      <p id="empty" class="empty"></p>
 
       <footer>
         <button id="main-button" class="main-button" type="button">Start</button>
