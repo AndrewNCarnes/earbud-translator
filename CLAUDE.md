@@ -17,7 +17,26 @@ Website (installable PWA) meant for iPhone Safari with AirPods: hears English or
 
 ## Shared pieces
 - `src/audio.ts`: `@ricky0123/vad-web` (Silero VAD) splits mic audio into 16 kHz phrases for the AI engines.
-- `src/speech.ts`: `speechSynthesis` output with voice ranking/picker. It must be unlocked during the Start tap on iOS.
+- `src/speech.ts`: speaks replies.
+  - "Natural AI voices" (default) play generated audio through Web Audio.
+  - "Device voices" use `speechSynthesis`, which on iOS only offers built-in voices, never downloaded Premium/Enhanced ones.
+  - Falls back to device voices until a natural voice has loaded, or if it fails.
+  - `unlockSpeech()` must run inside the Start/Test tap on iOS.
+- `src/tts/tts-worker.ts`: natural voices on `onnxruntime-web/wasm` 1.29 directly (no Transformers.js, which crashes iOS).
+  - **English:** Kokoro-82M q8, with text normalization ported from kokoro-js and `phonemizer` (English-only data).
+  - **Spanish:** Piper voices, using `src/vendor/piper-phonemize.js`.
+  - Files cache in Cache Storage `natural-voices-v1`. Cache names must not start with `airpod-translator-`, which `public/sw.js` deletes on update.
+  - `src/tts/natural-voices.ts` is the main-thread client.
+  - Speed: Kokoro runs about 2.7× slower than real time on one WASM thread. Every model variant (q8, fp32, fp16, q8f16) and optimization level benchmarked the same on 2026-09-15, so a different file won't help. Multithreading needs cross-origin isolation, which breaks ONNX Runtime in Safari.
+  - Audio streams one sentence at a time (`done` flag on `audio` messages), so playback starts after the first sentence.
+  - Piper runs about 20× faster than Kokoro. `en_US-lessac-medium` and `en_US-ryan-medium` are offered as fast English options.
+  - Testing overrides: `?kokoroModel=<onnx file>` and `?voiceOpt=basic|extended|all`.
+- `src/webspeech.ts` reliability:
+  - A stalled session (no results for 1.5 s) is ended with `stop()` so its text still translates.
+  - `audio-capture` and `network` errors retry 3× with backoff before giving up.
+  - The Spanish accent tag (`es-US`/`es-MX`/`es-ES`) is a setting.
+- Microphone picker: in Settings for every engine. AI engines show the actual opened device (`createListener` returns it). Safari speech can't choose a mic, so the picker is disabled there.
+- `src/settings.ts`: localStorage helpers that fail soft.
 - `src/messages.ts`: the worker message contract. Both workers speak it.
 - `src/worker-shared.ts`: translation model IDs, hallucination filter, progress tracking.
 - `public/sw.js` + `public/manifest.webmanifest`: offline app shell and home-screen install.

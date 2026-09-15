@@ -2,8 +2,8 @@ import { defineConfig } from 'vite';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 
 const VAD_DIST = 'node_modules/@ricky0123/vad-web/dist';
-// vad-web imports `onnxruntime-web/wasm` from its own nested copy, which differs from the one Transformers.js uses.
-const VAD_ORT_DIST = 'node_modules/@ricky0123/vad-web/node_modules/onnxruntime-web/dist';
+// ONNX Runtime 1.29 is shared by vad-web (deduped) and the natural-voice worker, which both load these WASM files at runtime.
+const VAD_ORT_DIST = 'node_modules/onnxruntime-web/dist';
 
 export default defineConfig({
   // Relative paths so the site works under a GitHub Pages sub-path (/<repo>/).

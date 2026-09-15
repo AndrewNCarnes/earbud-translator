@@ -2,19 +2,28 @@ import './style.css';
 
 import type { MicVAD } from '@ricky0123/vad-web';
 
-import { createListener, listMicrophones } from './audio';
+import { createListener, listMicrophones, type MicrophoneInUse } from './audio';
 import { OTHER, type FromWorker, type Lang, type ToWorker } from './messages';
 import { translateOnline } from './online-translate';
+import { readSetting, writeSetting } from './settings';
 import {
+  getNaturalVoice,
   getPreferredVoice,
+  getVoiceStyle,
+  onNaturalVoiceError,
   onVoicesChanged,
+  setNaturalVoice,
   setPreferredVoice,
+  setVoiceStyle,
   speak,
   stopSpeaking,
   unlockSpeech,
   voicesFor,
+  type VoiceStyle,
 } from './speech';
-import { WebSpeechListener, isWebSpeechSupported } from './webspeech';
+import { naturalVoices } from './tts/natural-voices';
+import { NATURAL_VOICES, type NaturalVoiceId } from './tts/voices';
+import { SPANISH_ACCENTS, WebSpeechListener, isWebSpeechSupported, type SpanishAccent } from './webspeech';
 
 /**
  * - `ai`: Whisper + Opus-MT on-device via Transformers.js 4; detects the language automatically.
@@ -36,14 +45,25 @@ const ENGINE_NAMES: Record<Engine, string> = {
 const ENGINE_NOTES: Record<Engine, string> = {
   ai: 'Private and detects the language for you. Downloads a few hundred MB once. Currently crashes Safari on iPhone.',
   'ai-legacy':
-    'Experimental: an older version of the AI library that might avoid the iPhone crash. Downloads about 320 MB once.',
+    'Experimental: an older version of the AI library that avoids the iPhone crash and detects the language for you. Downloads about 320 MB once.',
   webspeech: "No download, but needs internet. Choose which language you're hearing with the buttons above.",
 };
 const EMPTY_TEXT: Record<'ai' | 'webspeech', string> = {
   ai: 'Tap Start, then talk or play some English or Spanish. The first start downloads a few hundred MB of AI models, so use Wi-Fi.',
   webspeech: "Choose the language you're hearing, tap Start, and let them talk.",
 };
+const MIC_NOTES: Record<'ai' | 'webspeech', string> = {
+  ai: 'The iPhone mic usually hears other people better than AirPods mics, which focus on your own voice.',
+  webspeech:
+    "Safari speech always uses your iPhone's current audio input, so the mic can't be changed in this mode. Switch to an on-device AI engine to pick one.",
+};
+const VOICE_STYLE_NOTES: Record<VoiceStyle, string> = {
+  natural:
+    'Human-sounding AI voices made on your phone. The first time, English downloads about 90 MB and Spanish about 60 MB.',
+  device: "Your device's built-in voices. No download, but on iPhone they sound robotic.",
+};
 
+const LANGUAGE_NAMES: Record<Lang, string> = { en: 'English', es: 'Spanish' };
 const FLAGS: Record<Lang, string> = { en: '🇺🇸', es: '🇪🇸' };
 const LANGS: Lang[] = ['en', 'es'];
 const VOICE_SAMPLES: Record<Lang, string> = {
@@ -52,11 +72,13 @@ const VOICE_SAMPLES: Record<Lang, string> = {
 };
 
 const MODELS_CACHED_KEY = 'airpod-translator:models-cached';
+const NATURAL_VOICES_CACHED_KEY = 'airpod-translator:natural-voices-cached';
 const INSTALL_HINT_DISMISSED_KEY = 'airpod-translator:install-hint-dismissed';
-/** Set while models load and cleared when loading ends, so a leftover value means the tab crashed mid-load. */
+/** Set while models or voices load and cleared afterwards, so a leftover value means the tab crashed mid-load. */
 const LOAD_STAGE_KEY = 'airpod-translator:load-stage';
 const ENGINE_KEY = 'airpod-translator:engine';
 const LISTEN_LANGUAGE_KEY = 'airpod-translator:listen-language';
+const SPANISH_ACCENT_KEY = 'airpod-translator:spanish-accent';
 const EMAIL_KEY = 'airpod-translator:translation-email';
 
 /** Ignore the mic briefly after speaking so the tail of the voice isn't picked up. */
@@ -82,17 +104,24 @@ const STATUS_LABELS: Record<Status, string> = {
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const statusDot = $('status-dot');
 const statusText = $('status-text');
+const micStatus = $('mic-status');
 const progress = $('progress');
 const progressBar = $('progress-bar');
 const progressText = $('progress-text');
-const micField = $('mic-field');
-const micSelect = $<HTMLSelectElement>('mic');
 const direction = $('direction');
 const listenButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-listen]')];
 const engineSelect = $<HTMLSelectElement>('engine');
 const engineNote = $('engine-note');
+const accentField = $('accent-field');
+const accentSelect = $<HTMLSelectElement>('spanish-accent');
+const micSelect = $<HTMLSelectElement>('mic');
+const micNote = $('mic-note');
 const emailField = $('email-field');
 const emailInput = $<HTMLInputElement>('email');
+const voiceStyleSelect = $<HTMLSelectElement>('voice-style');
+const voiceStyleNote = $('voice-style-note');
+const naturalVoiceFields = $('natural-voice-fields');
+const deviceVoiceFields = $('device-voice-fields');
 const errorBox = $('error');
 const list = $('entries');
 const empty = $('empty');
@@ -100,6 +129,10 @@ const mainButton = $<HTMLButtonElement>('main-button');
 const voiceSelects: Record<Lang, HTMLSelectElement> = {
   en: $<HTMLSelectElement>('voice-en'),
   es: $<HTMLSelectElement>('voice-es'),
+};
+const naturalVoiceSelects: Record<Lang, HTMLSelectElement> = {
+  en: $<HTMLSelectElement>('natural-voice-en'),
+  es: $<HTMLSelectElement>('natural-voice-es'),
 };
 
 let worker: Worker | null = null;
@@ -116,26 +149,7 @@ let nextId = 0;
 let speechChain: Promise<void> = Promise.resolve();
 let wakeLock: WakeLockSentinel | null = null;
 let listenLanguage: Lang = 'es';
-
-function readSetting(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeSetting(key: string, value: string | null) {
-  try {
-    if (value === null) {
-      localStorage.removeItem(key);
-    } else {
-      localStorage.setItem(key, value);
-    }
-  } catch {
-    // Storage unavailable (e.g. private browsing); the setting just isn't remembered.
-  }
-}
+let micInUse: string | null = null;
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -178,6 +192,12 @@ function showError(message: string | null) {
 
 function formatMB(bytes: number) {
   return `${Math.round(bytes / 1_000_000)} MB`;
+}
+
+function showProgress(text: string, fraction: number) {
+  progress.hidden = false;
+  progressBar.style.width = `${Math.min(100, Math.max(0, fraction * 100))}%`;
+  progressText.textContent = text;
 }
 
 function createWorker(engine: AiEngine): Worker {
@@ -228,13 +248,12 @@ function loadModels(engine: AiEngine): Promise<void> {
       if (message.type === 'stage') {
         stage = message.label;
         writeSetting(LOAD_STAGE_KEY, stage);
-        progress.hidden = false;
-        progressBar.style.width = '0%';
-        progressText.textContent = `Loading ${stage}…`;
+        showProgress(`Loading ${stage}…`, 0);
       } else if (message.type === 'progress' && message.total > 0) {
-        progress.hidden = false;
-        progressBar.style.width = `${Math.min(100, (message.loaded / message.total) * 100)}%`;
-        progressText.textContent = `Downloading ${stage}: ${formatMB(message.loaded)} of ${formatMB(message.total)} (one time only)`;
+        showProgress(
+          `Downloading ${stage}: ${formatMB(message.loaded)} of ${formatMB(message.total)} (one time only)`,
+          message.loaded / message.total,
+        );
       } else if (message.type === 'ready') {
         cleanup();
         writeSetting(modelsCachedKey(engine), '1');
@@ -248,6 +267,40 @@ function loadModels(engine: AiEngine): Promise<void> {
     target.postMessage({ type: 'load', lowMemory: IS_LOW_MEMORY } satisfies ToWorker);
   });
   return modelsReady;
+}
+
+/** Downloads (first time) and loads the natural voice for a language. Returns false if it failed. */
+async function loadNaturalVoice(lang: Lang): Promise<boolean> {
+  const voice = getNaturalVoice(lang);
+  if (naturalVoices.isReady(voice)) {
+    return true;
+  }
+  const label = `natural ${LANGUAGE_NAMES[lang]} voice`;
+  writeSetting(LOAD_STAGE_KEY, label);
+  showProgress(`Loading ${label}…`, 0);
+  try {
+    await naturalVoices.load(voice, (loaded, total) =>
+      showProgress(`Downloading ${label}: ${formatMB(loaded)} of ${formatMB(total)} (one time only)`, total ? loaded / total : 0),
+    );
+    writeSetting(NATURAL_VOICES_CACHED_KEY, '1');
+    return true;
+  } catch (error) {
+    showError(`Couldn't load the ${label}, so the device voice is used instead. ${errorText(error)}`);
+    return false;
+  } finally {
+    writeSetting(LOAD_STAGE_KEY, null);
+    progress.hidden = true;
+  }
+}
+
+/** Loads both natural voices one after the other. Until they're ready, replies use the device voice. */
+async function preloadNaturalVoices() {
+  if (getVoiceStyle() !== 'natural') {
+    return;
+  }
+  for (const lang of LANGS) {
+    await loadNaturalVoice(lang);
+  }
 }
 
 function handleWorkerResult(event: MessageEvent<FromWorker>) {
@@ -326,6 +379,7 @@ async function translatePhrase(text: string, language: Lang) {
 function startWebSpeech() {
   webSpeech ??= new WebSpeechListener({
     getLanguage: () => listenLanguage,
+    getLanguageTag: (language) => (language === 'es' ? (accentSelect.value as SpanishAccent) : 'en-US'),
     onHearing: () => {
       if (!speaking && pending === 0) {
         setStatus('hearing');
@@ -344,10 +398,14 @@ async function populateMicrophones() {
   const selected = micSelect.value;
   const microphones = await listMicrophones();
   micSelect.replaceChildren(
-    ...microphones.map((mic, index) => new Option(mic.label || `Microphone ${index + 1}`, mic.deviceId)),
+    ...microphones.map((mic, index) => {
+      const label = mic.label || `Microphone ${index + 1}`;
+      return new Option(mic.deviceId === micInUse ? `${label} (in use)` : label, mic.deviceId);
+    }),
   );
-  // Prefer the phone's own mic: AirPods mics are tuned to the wearer's voice and filter out other people.
+  // The mic in use wins, then the user's pick, then the phone's own mic (AirPods mics focus on the wearer's voice).
   const preferred =
+    microphones.find((mic) => mic.deviceId === micInUse) ??
     microphones.find((mic) => mic.deviceId === selected) ??
     microphones.find((mic) => /iphone|built-in|internal/i.test(mic.label));
   if (preferred) {
@@ -355,8 +413,24 @@ async function populateMicrophones() {
   }
 }
 
+function showMicInUse(microphone: MicrophoneInUse | null, description?: string) {
+  micInUse = microphone?.id ?? null;
+  const text = description ?? (microphone ? `Mic: ${microphone.label || 'default microphone'}` : '');
+  micStatus.hidden = !text;
+  micStatus.textContent = text;
+  void populateMicrophones();
+}
+
+/** Safari speech can't be told which mic to use; it takes the system's current input. */
+async function showSafariMic() {
+  const microphones = await listMicrophones();
+  const system = microphones.find((mic) => mic.deviceId === 'default') ?? microphones[0];
+  const label = system?.label || "your iPhone's current audio input";
+  showMicInUse(system ? { id: system.deviceId, label } : null, `Mic: ${label} (chosen by Safari)`);
+}
+
 async function startListening() {
-  listener = await createListener({
+  const started = await createListener({
     deviceId: micSelect.value || undefined,
     onSpeechStart: () => {
       // Speech that starts while the app is talking is almost certainly its own voice.
@@ -376,6 +450,8 @@ async function startListening() {
     },
     onMisfire: refreshStatus,
   });
+  listener = started.vad;
+  showMicInUse(started.microphone);
 }
 
 async function requestWakeLock() {
@@ -388,7 +464,7 @@ async function requestWakeLock() {
 
 async function start() {
   showError(null);
-  // Must happen synchronously inside the tap for iOS to allow speech later.
+  // Must happen synchronously inside the tap for iOS to allow audio later.
   unlockSpeech();
   const engine = currentEngine();
   running = true;
@@ -400,13 +476,11 @@ async function start() {
       // Start recognition before any await so it's still inside the tap, which iOS requires.
       startWebSpeech();
       refreshStatus();
-      await requestWakeLock();
+      await Promise.all([requestWakeLock(), showSafariMic()]);
     } else {
       setStatus('loading');
       await Promise.all([loadModels(engine), requestWakeLock()]);
       await startListening();
-      // Device labels are only visible after mic permission is granted.
-      await populateMicrophones();
     }
     mainButton.textContent = 'Stop';
     mainButton.classList.add('stop');
@@ -414,9 +488,12 @@ async function start() {
   } catch (error) {
     await stop();
     showError(errorText(error));
+    return;
   } finally {
     mainButton.disabled = false;
   }
+
+  void preloadNaturalVoices();
 }
 
 async function stop() {
@@ -432,6 +509,7 @@ async function stop() {
   mainButton.textContent = 'Start';
   mainButton.classList.remove('stop');
   engineSelect.disabled = false;
+  showMicInUse(null);
   refreshStatus();
 }
 
@@ -444,13 +522,33 @@ function renderEngine() {
   engineNote.textContent = prefix + ENGINE_NOTES[engine];
   direction.hidden = !usesWebSpeech;
   emailField.hidden = !usesWebSpeech;
-  micField.hidden = usesWebSpeech;
+  accentField.hidden = !usesWebSpeech;
+  micSelect.disabled = usesWebSpeech;
+  micNote.textContent = MIC_NOTES[usesWebSpeech ? 'webspeech' : 'ai'];
   empty.textContent = EMPTY_TEXT[usesWebSpeech ? 'webspeech' : 'ai'];
 }
 
 function renderDirection() {
   for (const button of listenButtons) {
     button.setAttribute('aria-pressed', String(button.dataset.listen === listenLanguage));
+  }
+}
+
+function renderVoiceStyle() {
+  const style = getVoiceStyle();
+  voiceStyleSelect.value = style;
+  voiceStyleNote.textContent = VOICE_STYLE_NOTES[style];
+  naturalVoiceFields.hidden = style !== 'natural';
+  deviceVoiceFields.hidden = style !== 'device';
+}
+
+function populateNaturalVoices() {
+  const entries = Object.entries(NATURAL_VOICES) as [NaturalVoiceId, (typeof NATURAL_VOICES)[NaturalVoiceId]][];
+  for (const lang of LANGS) {
+    naturalVoiceSelects[lang].replaceChildren(
+      ...entries.filter(([, voice]) => voice.lang === lang).map(([id, voice]) => new Option(voice.label, id)),
+    );
+    naturalVoiceSelects[lang].value = getNaturalVoice(lang);
   }
 }
 
@@ -492,6 +590,7 @@ micSelect.addEventListener('change', async () => {
     return;
   }
   await listener.destroy();
+  listener = null;
   await startListening().catch((error) => showError(errorText(error)));
 });
 
@@ -509,20 +608,52 @@ for (const button of listenButtons) {
   });
 }
 
+accentSelect.addEventListener('change', () => {
+  writeSetting(SPANISH_ACCENT_KEY, accentSelect.value);
+  webSpeech?.restart();
+});
+
 emailInput.addEventListener('change', () => {
   writeSetting(EMAIL_KEY, emailInput.value.trim() || null);
 });
 
+voiceStyleSelect.addEventListener('change', () => {
+  setVoiceStyle(voiceStyleSelect.value as VoiceStyle);
+  renderVoiceStyle();
+  if (running) {
+    void preloadNaturalVoices();
+  }
+});
+
 for (const lang of LANGS) {
   voiceSelects[lang].addEventListener('change', () => setPreferredVoice(lang, voiceSelects[lang].value));
+  naturalVoiceSelects[lang].addEventListener('change', () => {
+    setNaturalVoice(lang, naturalVoiceSelects[lang].value as NaturalVoiceId);
+    if (running && getVoiceStyle() === 'natural') {
+      void loadNaturalVoice(lang);
+    }
+  });
 }
 
 document.querySelectorAll<HTMLButtonElement>('.test-voice').forEach((button) => {
-  button.addEventListener('click', () => {
+  button.addEventListener('click', async () => {
     const lang = button.dataset.lang as Lang;
+    // Unlock audio while still inside the tap, before any download.
+    unlockSpeech();
     stopSpeaking();
-    void speak(VOICE_SAMPLES[lang], lang);
+    if (getVoiceStyle() === 'natural' && !naturalVoices.isReady(getNaturalVoice(lang))) {
+      button.disabled = true;
+      button.textContent = 'Loading…';
+      await loadNaturalVoice(lang);
+      button.disabled = false;
+      button.textContent = 'Test';
+    }
+    await speak(VOICE_SAMPLES[lang], lang);
   });
+});
+
+onNaturalVoiceError((message) => {
+  showError(`The natural voice failed, so the device voice was used: ${message}`);
 });
 
 document.addEventListener('visibilitychange', () => {
@@ -555,11 +686,14 @@ const urlEngine = URL_PARAMS.get('engine') as EngineChoice | null;
 const savedEngine = readSetting(ENGINE_KEY) as EngineChoice | null;
 engineSelect.value = [urlEngine, savedEngine].find((choice) => choice && ENGINE_CHOICES.includes(choice)) ?? 'auto';
 listenLanguage = readSetting(LISTEN_LANGUAGE_KEY) === 'en' ? 'en' : 'es';
+accentSelect.value = SPANISH_ACCENTS.find((accent) => accent === readSetting(SPANISH_ACCENT_KEY)) ?? 'es-US';
 emailInput.value = readSetting(EMAIL_KEY) ?? '';
 
 setUpInstallHint();
 renderEngine();
 renderDirection();
+renderVoiceStyle();
+populateNaturalVoices();
 onVoicesChanged(populateVoices);
 void populateMicrophones();
 setStatus('idle');
@@ -570,14 +704,20 @@ const crashedWhileLoading = readSetting(LOAD_STAGE_KEY);
 writeSetting(LOAD_STAGE_KEY, null);
 
 if (crashedWhileLoading) {
-  const advice = IS_IOS
-    ? ' On iPhone, open Settings below and choose “Safari speech + online translation”.'
-    : ' Close other tabs and apps, then tap Start again.';
+  const advice = crashedWhileLoading.includes('voice')
+    ? ' Open Settings below and set Voice style to “Device voices”.'
+    : IS_IOS
+      ? ' On iPhone, open Settings below and choose “Safari speech + online translation” or the experimental engine.'
+      : ' Close other tabs and apps, then tap Start again.';
   showError(`Last time, the page stopped while loading the ${crashedWhileLoading}, most likely out of memory.${advice}`);
 } else {
-  // Returning visitors already have the models cached, so warm them up right away.
+  // Returning visitors already have everything cached, so warm it up right away: models first, then voices.
   const engine = currentEngine();
+  let warmUp: Promise<unknown> = Promise.resolve();
   if (engine !== 'webspeech' && readSetting(modelsCachedKey(engine))) {
-    loadModels(engine).catch(() => undefined);
+    warmUp = loadModels(engine).catch(() => undefined);
+  }
+  if (readSetting(NATURAL_VOICES_CACHED_KEY)) {
+    void warmUp.then(preloadNaturalVoices);
   }
 }

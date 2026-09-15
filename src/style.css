@@ -68,6 +68,12 @@ h1 {
   background: var(--accent);
 }
 
+.mic-status {
+  margin: -10px 0 16px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .install-hint {
   display: flex;
   align-items: center;

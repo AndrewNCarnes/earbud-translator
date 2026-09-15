@@ -10,8 +10,11 @@
     "typecheck": "tsc"
   },
   "dependencies": {
+    "@diffusionstudio/vits-web": "^1.0.3",
     "@huggingface/transformers": "^4.2.0",
     "@ricky0123/vad-web": "^0.0.31",
+    "onnxruntime-web": "^1.29.0",
+    "phonemizer": "^1.2.1",
     "transformers-v2": "npm:@xenova/transformers@^2.15.1"
   },
   "devDependencies": {

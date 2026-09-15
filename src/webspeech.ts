@@ -1,7 +1,14 @@
 import type { Lang } from './messages';
 
-const RECOGNITION_TAGS: Record<Lang, string> = { en: 'en-US', es: 'es-ES' };
+export type SpanishAccent = 'es-US' | 'es-MX' | 'es-ES';
+export const SPANISH_ACCENTS: SpanishAccent[] = ['es-US', 'es-MX', 'es-ES'];
+
 const RESTART_DELAY_MS = 200;
+/** iOS sometimes stops sending results without ending the session; after this long, end it ourselves. */
+const STALL_MS = 1_500;
+/** Errors that are often temporary on iOS get this many retries (with growing delays) before giving up. */
+const MAX_RETRIES = 3;
+const RETRY_BASE_DELAY_MS = 500;
 
 // Minimal typings: TypeScript's DOM lib doesn't include the Web Speech recognition API (still prefixed in Safari).
 interface RecognitionResult {
@@ -21,6 +28,7 @@ interface Recognition {
   interimResults: boolean;
   maxAlternatives: number;
   start(): void;
+  stop(): void;
   abort(): void;
   onresult: ((event: RecognitionResultEvent) => void) | null;
   onerror: ((event: RecognitionErrorEvent) => void) | null;
@@ -38,22 +46,30 @@ function recognitionConstructor(): RecognitionConstructor | undefined {
 
 export const isWebSpeechSupported = () => !!recognitionConstructor();
 
-/** Errors that won't fix themselves by restarting. Others ('no-speech', 'aborted') are routine. */
+/** Errors that restarting won't fix. */
 const FATAL_ERRORS: Record<string, string> = {
   'not-allowed':
     'Speech recognition was blocked. Allow the microphone and speech recognition for this site, then tap Start again.',
   'service-not-allowed':
     "Speech recognition isn't available. Turn on Siri & Dictation in Settings → Siri, then tap Start again.",
-  'audio-capture': 'No microphone was found.',
+  'language-not-supported':
+    "Safari speech recognition doesn't support this language here. Try another Spanish accent in Settings, or the experimental on-device AI engine.",
+};
+
+/** Errors that are often temporary on iOS; these messages are shown only once retries run out. */
+const RECOVERABLE_ERRORS: Record<string, string> = {
+  'audio-capture':
+    'Safari speech recognition keeps losing the microphone. For Spanish, the experimental on-device AI engine in Settings is more reliable on iPhone.',
   network: 'Safari speech recognition needs an internet connection.',
-  'language-not-supported': "This language isn't supported by speech recognition on this device.",
 };
 
 type ListenerOptions = {
   getLanguage: () => Lang;
+  /** Recognition tag for a language, e.g. the chosen Spanish accent. */
+  getLanguageTag: (language: Lang) => string;
   onHearing: () => void;
   onPhrase: (text: string, language: Lang) => void;
-  /** Listening has stopped for good (permission denied, no internet, …). */
+  /** Listening has stopped for good (permission denied, retries exhausted, …). */
   onFatalError: (message: string) => void;
 };
 
@@ -68,6 +84,9 @@ export class WebSpeechListener {
   private paused = false;
   private discardCurrent = false;
   private restartTimer: ReturnType<typeof setTimeout> | undefined;
+  private stallTimer: ReturnType<typeof setTimeout> | undefined;
+  private consecutiveErrors = 0;
+  private nextRestartDelay = RESTART_DELAY_MS;
   private sessionLanguage: Lang = 'es';
   private finalText = '';
   private interimText = '';
@@ -89,6 +108,7 @@ export class WebSpeechListener {
   start() {
     this.active = true;
     this.paused = false;
+    this.consecutiveErrors = 0;
     this.begin();
   }
 
@@ -123,7 +143,7 @@ export class WebSpeechListener {
       return;
     }
     this.sessionLanguage = this.options.getLanguage();
-    this.recognition.lang = RECOGNITION_TAGS[this.sessionLanguage];
+    this.recognition.lang = this.options.getLanguageTag(this.sessionLanguage);
     this.finalText = '';
     this.interimText = '';
     try {
@@ -135,13 +155,28 @@ export class WebSpeechListener {
 
   private abortSession() {
     clearTimeout(this.restartTimer);
+    clearTimeout(this.stallTimer);
     this.discardCurrent = true;
     this.recognition.abort();
   }
 
-  private scheduleRestart() {
+  private scheduleRestart(delay = RESTART_DELAY_MS) {
     clearTimeout(this.restartTimer);
-    this.restartTimer = setTimeout(() => this.begin(), RESTART_DELAY_MS);
+    this.restartTimer = setTimeout(() => this.begin(), delay);
+  }
+
+  /** Ends a session whose results stopped arriving, so the text heard so far still gets translated. */
+  private watchForStall() {
+    clearTimeout(this.stallTimer);
+    this.stallTimer = setTimeout(() => {
+      if ((this.finalText || this.interimText).trim()) {
+        try {
+          this.recognition.stop();
+        } catch {
+          // Already ended.
+        }
+      }
+    }, STALL_MS);
   }
 
   private handleResult(event: RecognitionResultEvent) {
@@ -156,18 +191,33 @@ export class WebSpeechListener {
       }
     }
     this.interimText = interim;
+    this.consecutiveErrors = 0;
     this.options.onHearing();
+    this.watchForStall();
   }
 
   private handleError(event: RecognitionErrorEvent) {
-    const message = FATAL_ERRORS[event.error];
-    if (message) {
+    const fatal = FATAL_ERRORS[event.error];
+    if (fatal) {
       this.active = false;
-      this.options.onFatalError(message);
+      this.options.onFatalError(fatal);
+      return;
     }
+    const recoverable = RECOVERABLE_ERRORS[event.error];
+    if (recoverable) {
+      this.consecutiveErrors += 1;
+      if (this.consecutiveErrors > MAX_RETRIES) {
+        this.active = false;
+        this.options.onFatalError(recoverable);
+      } else {
+        this.nextRestartDelay = RETRY_BASE_DELAY_MS * 2 ** (this.consecutiveErrors - 1);
+      }
+    }
+    // 'no-speech' and 'aborted' are routine; `onend` restarts listening.
   }
 
   private handleEnd() {
+    clearTimeout(this.stallTimer);
     // iOS sometimes ends a session without marking the last result final, so fall back to the interim text.
     const text = (this.finalText || this.interimText).trim();
     const discard = this.discardCurrent;
@@ -179,7 +229,8 @@ export class WebSpeechListener {
       this.options.onPhrase(text, this.sessionLanguage);
     }
     if (this.active && !this.paused) {
-      this.scheduleRestart();
+      this.scheduleRestart(this.nextRestartDelay);
     }
+    this.nextRestartDelay = RESTART_DELAY_MS;
   }
 }

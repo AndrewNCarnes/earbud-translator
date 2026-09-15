@@ -18,6 +18,7 @@
       <header>
         <h1>AirPod Translator</h1>
         <p class="status"><span id="status-dot" class="dot"></span><span id="status-text">Stopped</span></p>
+        <p id="mic-status" class="mic-status" hidden></p>
       </header>
 
       <p id="install-hint" class="install-hint" hidden>
@@ -33,13 +34,9 @@
         </div>
       </section>
 
-      <label id="mic-field" class="field">
-        <span>Microphone</span>
-        <select id="mic"></select>
-      </label>
-
       <details class="settings">
         <summary>Settings</summary>
+
         <div class="field">
           <label for="engine">Translation engine</label>
           <select id="engine">
@@ -50,6 +47,23 @@
           </select>
           <p id="engine-note" class="hint"></p>
         </div>
+
+        <div id="accent-field" class="field" hidden>
+          <label for="spanish-accent">Spanish accent for Safari speech</label>
+          <select id="spanish-accent">
+            <option value="es-US">United States</option>
+            <option value="es-MX">Mexico</option>
+            <option value="es-ES">Spain</option>
+          </select>
+          <p class="hint">If Spanish stalls, try a different accent, or the experimental on-device AI engine.</p>
+        </div>
+
+        <div class="field">
+          <label for="mic">Microphone</label>
+          <select id="mic"></select>
+          <p id="mic-note" class="hint"></p>
+        </div>
+
         <div id="email-field" class="field" hidden>
           <label for="email">Email for more free translations (optional)</label>
           <input id="email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" />
@@ -58,24 +72,53 @@
             day.
           </p>
         </div>
+
         <div class="field">
-          <label for="voice-en">English voice</label>
-          <div class="row">
-            <select id="voice-en"></select>
-            <button type="button" class="test-voice" data-lang="en">Test</button>
+          <label for="voice-style">Voice style</label>
+          <select id="voice-style">
+            <option value="natural">Natural AI voices (recommended)</option>
+            <option value="device">Device voices</option>
+          </select>
+          <p id="voice-style-note" class="hint"></p>
+        </div>
+
+        <div id="natural-voice-fields">
+          <div class="field">
+            <label for="natural-voice-en">English voice</label>
+            <div class="row">
+              <select id="natural-voice-en"></select>
+              <button type="button" class="test-voice" data-lang="en">Test</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="natural-voice-es">Spanish voice</label>
+            <div class="row">
+              <select id="natural-voice-es"></select>
+              <button type="button" class="test-voice" data-lang="es">Test</button>
+            </div>
           </div>
         </div>
-        <div class="field">
-          <label for="voice-es">Spanish voice</label>
-          <div class="row">
-            <select id="voice-es"></select>
-            <button type="button" class="test-voice" data-lang="es">Test</button>
+
+        <div id="device-voice-fields" hidden>
+          <div class="field">
+            <label for="voice-en">English voice</label>
+            <div class="row">
+              <select id="voice-en"></select>
+              <button type="button" class="test-voice" data-lang="en">Test</button>
+            </div>
           </div>
+          <div class="field">
+            <label for="voice-es">Spanish voice</label>
+            <div class="row">
+              <select id="voice-es"></select>
+              <button type="button" class="test-voice" data-lang="es">Test</button>
+            </div>
+          </div>
+          <p class="hint">
+            Voices named Natural, Premium, or Enhanced sound the most human. iPhone only lets websites use its built-in
+            voices, so switch to Natural AI voices for a human sound there.
+          </p>
         </div>
-        <p class="hint">
-          Voices named Natural, Premium, or Enhanced sound the most human. On iPhone, download better ones in
-          Settings → Accessibility → Spoken Content → Voices, then reload this page.
-        </p>
       </details>
 
       <section id="progress" class="progress" hidden>

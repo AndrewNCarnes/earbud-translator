@@ -77,7 +77,12 @@ async function load(lowMemory: boolean) {
 
   // Run once on silence so the first real phrase doesn't pay one-time setup costs (e.g. WebGPU shader compiles).
   post({ type: 'stage', label: 'warm-up' });
-  await transcribe(new Float32Array(16_000));
+  try {
+    await transcribe(new Float32Array(16_000));
+  } catch (error) {
+    // Only a speed-up for the first phrase; not worth failing Start over.
+    console.warn('Warm-up failed; continuing without it.', error);
+  }
 
   post({ type: 'ready', device });
 }

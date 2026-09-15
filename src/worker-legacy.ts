@@ -57,7 +57,12 @@ async function load() {
   translators = { es: spanishToEnglish, en: englishToSpanish };
 
   post({ type: 'stage', label: 'warm-up (old library)' });
-  await transcribe(new Float32Array(16_000));
+  try {
+    await transcribe(new Float32Array(16_000));
+  } catch (error) {
+    // Only a speed-up for the first phrase; it errored on an iPhone, so don't let it block Start.
+    console.warn('Warm-up failed; continuing without it.', error);
+  }
 
   post({ type: 'ready', device: 'wasm' });
 }
